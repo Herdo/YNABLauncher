@@ -20,8 +20,19 @@
         //////////////////////////////////////////////////////////////////
         #region Constructors
 
+        /// <summary>
+        /// Initializes a new instance of the <see cref="CryptoEngine"/> class using a given <paramref name="salt"/>.
+        /// </summary>
+        /// <param name="salt">The salt to use.</param>
+        /// <exception cref="ArgumentNullException"><paramref name="salt"/> is null.</exception>
+        /// <exception cref="ArgumentException"><paramref name="salt"/>.Length is less than 8.</exception>
         public CryptoEngine(byte[] salt)
         {
+            if (salt == null)
+                throw new ArgumentNullException(nameof(salt));
+            if (salt.Length < 8)
+                throw new ArgumentException("Salt is to small. Length must be at least 8 bytes.", nameof(salt));
+
             _salt = salt;
         }
 
@@ -187,11 +198,25 @@
 
         byte[] ICryptoEngine.Encrypt(SecureString password, byte[] input, Encoding encoding)
         {
+            if (password == null)
+                throw new ArgumentNullException(nameof(password));
+            if (input == null)
+                throw new ArgumentNullException(nameof(input));
+            if (encoding == null)
+                throw new ArgumentNullException(nameof(encoding));
+
             return ExecuteSecuredFunction(password, pw => EncryptFile(pw, input, encoding));
         }
 
         byte[] ICryptoEngine.Decrypt(SecureString password, byte[] input, Encoding encoding)
         {
+            if (password == null)
+                throw new ArgumentNullException(nameof(password));
+            if (input == null)
+                throw new ArgumentNullException(nameof(input));
+            if (encoding == null)
+                throw new ArgumentNullException(nameof(encoding));
+
             return ExecuteSecuredFunction(password, pw => DecryptFile(pw, input, encoding));
         }
 
