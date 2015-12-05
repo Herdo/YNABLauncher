@@ -5,6 +5,7 @@
     using System.IO;
     using System.IO.Compression;
     using System.Security;
+    using System.Text;
     using System.Threading;
     using BLL;
     using Data;
@@ -14,6 +15,7 @@
         //////////////////////////////////////////////////////////////////
         #region Fields
 
+        private readonly Encoding _encoding;
         private readonly LaunchArguments _launchArguments;
         private readonly ICryptoEngine _cryptoEngine;
         private readonly string _encryptedZipPath;
@@ -27,10 +29,11 @@
         public SystemAccessor(LaunchArguments launchArguments,
                               ICryptoEngine cryptoEngine)
         {
+            _encoding = Encoding.GetEncoding(1252);
             _launchArguments = launchArguments;
             _cryptoEngine = cryptoEngine;
             _encryptedZipPath = Path.Combine(_launchArguments.EncryptedZipPath, "ynab.encrypted");
-            _decryptedZipPath = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N") + ".zip");
+            _decryptedZipPath = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N") + ".decrypted");
             Directory.SetCurrentDirectory(_launchArguments.YnabInstallDirectory);
         }
 
@@ -66,6 +69,18 @@
                 info.Attributes &= ~FileAttributes.ReadOnly;
         }
 
+        private byte[] ReadInputBytes(string inputFilename)
+        {
+            var input = File.ReadAllText(inputFilename, _encoding);
+            return _encoding.GetBytes(input);
+        }
+
+        private void WriteOuputBytes(string outputFilename, byte[] bytes)
+        {
+            var output = _encoding.GetString(bytes);
+            File.WriteAllText(outputFilename, output, _encoding);
+        }
+
         #endregion
 
         //////////////////////////////////////////////////////////////////
@@ -87,14 +102,26 @@
         {
             if (!File.Exists(_encryptedZipPath)) return;
 
+            Console.WriteLine("Reading encrypted archive...");
+            var input = ReadInputBytes(_encryptedZipPath);
+
             Console.WriteLine("Decrypting archive...");
-            _cryptoEngine.Decrypt(password, _encryptedZipPath, _decryptedZipPath);
+            var decrypted = _cryptoEngine.Decrypt(password, input, _encoding);
+
+            Console.WriteLine("Writing decrypted archive...");
+            WriteOuputBytes(_decryptedZipPath, decrypted);
         }
 
         void ISystemAccessor.Encrypt(SecureString password)
         {
+            Console.WriteLine("Reading decrypted archive...");
+            var input = ReadInputBytes(_decryptedZipPath);
+
             Console.WriteLine("Encrypting archive...");
-            _cryptoEngine.Encrypt(password, _decryptedZipPath, _encryptedZipPath);
+            var encrypted = _cryptoEngine.Encrypt(password, input, _encoding);
+
+            Console.WriteLine("Writing encrypted archive...");
+            WriteOuputBytes(_encryptedZipPath, encrypted);
 
             File.Delete(_decryptedZipPath);
         }
@@ -104,8 +131,8 @@
             if (!File.Exists(_decryptedZipPath)) return;
 
             Console.WriteLine("Unpacking archive...");
-            if (!Directory.Exists(_launchArguments.DecryptedWorkingFolderPath))
-                Directory.CreateDirectory(_launchArguments.DecryptedWorkingFolderPath);
+            if (Directory.Exists(_launchArguments.DecryptedWorkingFolderPath))
+                Directory.Delete(_launchArguments.DecryptedWorkingFolderPath, true);
             ZipFile.ExtractToDirectory(_decryptedZipPath, _launchArguments.DecryptedWorkingFolderPath);
 
             File.Delete(_decryptedZipPath);

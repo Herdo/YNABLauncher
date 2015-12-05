@@ -6,6 +6,7 @@
     using System.Runtime.InteropServices;
     using System.Security;
     using System.Security.Cryptography;
+    using System.Text;
 
     public class CryptoEngine : ICryptoEngine
     {
@@ -29,43 +30,65 @@
         //////////////////////////////////////////////////////////////////
         #region Private Methods
 
-        private void EncryptFile(string inputFilename,
-                                 string outputFilename,
-                                 string password)
+        private byte[] EncryptFile(string password,
+                                   byte[] input,
+                                   Encoding encoding)
         {
-            var fsInput = new FileStream(inputFilename,
-                                         FileMode.Open,
-                                         FileAccess.Read);
+            byte[] result;
 
-            var fsEncrypted = new FileStream(outputFilename,
-                                             FileMode.Create,
-                                             FileAccess.Write);
+            using (var aes = InitializeAes(password))
+            {
+                // Create a encryptor to perform the stream transform.
+                var encryptor = aes.CreateEncryptor(aes.Key, aes.IV);
 
-            var aes = new AesCryptoServiceProvider();
-            byte[] key;
-            byte[] iv;
-            GetKeyAndIvFromPasswordAndSalt(password, _salt, aes, out key, out iv);
-            aes.Key = key;
-            aes.IV = iv;
+                // Create the streams used for encryption.
+                using (var msEncrypt = new MemoryStream())
+                {
+                    using (var csEncrypt = new CryptoStream(msEncrypt, encryptor, CryptoStreamMode.Write))
+                    {
+                        using (var swEncrypt = new BinaryWriter(csEncrypt, encoding))
+                        {
+                            //Write all data to the stream.
+                            swEncrypt.Write(input);
+                        }
+                        result = msEncrypt.ToArray();
+                    }
+                }
+            }
 
-            var aesEncrypt = aes.CreateEncryptor();
-            var cryptostream = new CryptoStream(fsEncrypted,
-               aesEncrypt,
-               CryptoStreamMode.Write);
-
-            var bytearrayinput = new byte[fsInput.Length];
-            fsInput.Read(bytearrayinput, 0, bytearrayinput.Length);
-            cryptostream.Write(bytearrayinput, 0, bytearrayinput.Length);
-
-            // Cleanup
-            cryptostream.Close();
-            fsInput.Close();
-            fsEncrypted.Close();
+            return result;
         }
 
-        private void DecryptFile(string inputFilename,
-                                 string outputFilename,
-                                 string password)
+        private byte[] DecryptFile(string password,
+                                   byte[] input,
+                                   Encoding encoding)
+        {
+            byte[] result;
+
+            using (var aes = InitializeAes(password))
+            {
+                // Create a decrytor to perform the stream transform.
+                var decryptor = aes.CreateDecryptor(aes.Key, aes.IV);
+
+                // Create the streams used for decryption.
+                using (var msDecrypt = new MemoryStream(input))
+                {
+                    using (var csDecrypt = new CryptoStream(msDecrypt, decryptor, CryptoStreamMode.Read))
+                    {
+                        using (var srDecrypt = new StreamReader(csDecrypt, encoding))
+                        {
+                            // Read the decrypted bytes from the decrypting stream
+                            // and place them in the result.
+                            result = encoding.GetBytes(srDecrypt.ReadToEnd());
+                        }
+                    }
+                }
+            }
+            
+            return result;
+        }
+
+        private AesCryptoServiceProvider InitializeAes(string password)
         {
             var aes = new AesCryptoServiceProvider();
             byte[] key;
@@ -73,22 +96,7 @@
             GetKeyAndIvFromPasswordAndSalt(password, _salt, aes, out key, out iv);
             aes.Key = key;
             aes.IV = iv;
-
-            var fsread = new FileStream(inputFilename,
-               FileMode.Open,
-               FileAccess.Read);
-            
-            var aesDecrypt = aes.CreateDecryptor();
-            var cryptostreamDecr = new CryptoStream(fsread,
-                                                    aesDecrypt,
-                                                    CryptoStreamMode.Read);
-            
-            var fsDecrypted = new StreamWriter(outputFilename);
-            fsDecrypted.Write(new StreamReader(cryptostreamDecr).ReadToEnd());
-
-            // Cleanup
-            fsDecrypted.Flush();
-            fsDecrypted.Close();
+            return aes;
         }
 
         private static void GetKeyAndIvFromPasswordAndSalt(string password,
@@ -102,8 +110,10 @@
             iv = db.GetBytes(symmetricAlgorithm.BlockSize / 8);
         }
 
-        private static void ExecuteSecuredAction(SecureString password, Action<string> action)
+        private static byte[] ExecuteSecuredFunction(SecureString password, Func<string, byte[]> func)
         {
+            byte[] result = null;
+
             unsafe
             {
                 var length = password.Length;
@@ -148,7 +158,7 @@
                             null);
 
                         // Use the password.
-                        action(insecurePassword);
+                        result = func(insecurePassword);
                     },
                     delegate
                     {
@@ -166,6 +176,8 @@
                     },
                     null);
             }
+
+            return result;
         }
 
         #endregion
@@ -173,16 +185,14 @@
         //////////////////////////////////////////////////////////////////
         #region ICryptoEngine Members
 
-        void ICryptoEngine.Decrypt(SecureString password, string inputFile, string outputFile)
+        byte[] ICryptoEngine.Encrypt(SecureString password, byte[] input, Encoding encoding)
         {
-            if (!File.Exists(inputFile)) return;
-            ExecuteSecuredAction(password, pw => DecryptFile(inputFile, outputFile, pw));
+            return ExecuteSecuredFunction(password, pw => EncryptFile(pw, input, encoding));
         }
 
-        void ICryptoEngine.Encrypt(SecureString password, string inputFile, string outputFile)
+        byte[] ICryptoEngine.Decrypt(SecureString password, byte[] input, Encoding encoding)
         {
-            if (!File.Exists(inputFile)) return;
-            ExecuteSecuredAction(password, pw => EncryptFile(inputFile, outputFile, pw));
+            return ExecuteSecuredFunction(password, pw => DecryptFile(pw, input, encoding));
         }
 
         #endregion
